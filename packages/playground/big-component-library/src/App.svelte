@@ -7,7 +7,7 @@
 		Link,
 		DatePicker
 	} from 'carbon-components-svelte';
-	import Save from 'carbon-icons-svelte/lib/Save.svelte';
+	import { Save } from 'carbon-icons-svelte';
 	import { assign } from 'lodash-es';
 	import toNumber from 'lodash-es/toNumber.js';
 	import toPath from 'lodash-es/toPath.js';
