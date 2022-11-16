@@ -21,11 +21,11 @@ interface TimeStamp {
 }
 interface FileStat {
 	filename: string;
-	pkg?: string;
+	packagename?: string;
 	timestamps: TimeStamp[];
 }
-interface GroupStat {
-	pkg: string;
+interface PackageStats {
+	name: string;
 	count: number;
 	compileTime: number;
 }
@@ -77,50 +77,48 @@ export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
 			};
 
 			const logStats = async () => {
-				// find package jsons
-
+				// find package.json for each
+				const packages: { name: string; path: string }[] = [];
 				await Promise.all(
-					stats.map((stat) => findClosestPkgJsonPath(stat.filename).then((pkg) => (stat.pkg = pkg)))
+					stats.map(async (stat) => {
+						let pkg = packages.find((p) => stat.filename.startsWith(p.path));
+						if (!pkg) {
+							const pkgPath = await findClosestPkgJsonPath(stat.filename);
+							if (pkgPath) {
+								const path = pkgPath?.replace(/package.json$/, '');
+								const name = JSON.parse(readFileSync(pkgPath, 'utf-8')).name;
+								pkg = { name, path };
+								packages.push(pkg);
+							}
+						}
+						if (pkg) {
+							stat.packagename = pkg.name;
+						}
+					})
 				);
-				if (stats.length === 1) {
-					const stat = stats[0];
-					const libname = JSON.parse(readFileSync(stat.pkg, 'utf-8')).name;
-					const importString = stat.filename.slice(stat.filename.lastIndexOf(`/${libname}/`) + 1);
-					const componentName = importString.slice(
-						importString.lastIndexOf('/') + 1,
-						importString.lastIndexOf('.')
-					);
-					log.warn.once(
-						`prebundled ${importString}. Change the import to \`import {${componentName}} from '${libname}'\` or add ${libname} to optimizeDeps.exclude.`
-					);
-					return;
-				}
 				// group stats
-				const grouped: { [key: string]: GroupStat } = {};
+				const grouped: { [key: string]: PackageStats } = {};
 				stats.forEach((stat) => {
-					const compileTime = duration(stat.timestamps, 'compiled');
-					if (!grouped[stat.pkg]) {
-						const name = JSON.parse(readFileSync(stat.pkg, 'utf-8')).name;
-						grouped[stat.pkg] = {
-							count: 1,
-							compileTime,
-							pkg: name ?? stat.pkg
+					let group = grouped[stat.packagename];
+					if (!group) {
+						group = grouped[stat.packagename] = {
+							count: 0,
+							compileTime: 0,
+							name: stat.packagename
 						};
-					} else {
-						const group = grouped[stat.pkg];
-						group.count += 1;
-						group.compileTime += compileTime;
 					}
+					group.count += 1;
+					group.compileTime += duration(stat.timestamps, 'compiled');
 				});
 
 				const groups = Object.values(grouped);
 				groups.sort((a, b) => b.count - a.count);
-				const statLines = groups.map((groupStat) => {
-					const compileTime = groupStat.compileTime;
-					const compileAvg = groupStat.compileTime / groupStat.count;
+				const statLines = groups.map((pkgStats) => {
+					const compileTime = pkgStats.compileTime;
+					const compileAvg = pkgStats.compileTime / pkgStats.count;
 					return [
-						groupStat.pkg,
-						`${groupStat.count}`,
+						pkgStats.name,
+						`${pkgStats.count}`,
 						humanDuration(compileTime),
 						humanDuration(compileAvg)
 					];
@@ -178,8 +176,12 @@ export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
 			});
 
 			build.onEnd(async () => {
-				logProgress(true);
-				await logStats();
+				// only log if progress was logged or more than one component was compiled
+				// we don't want to log prebundle result of deep compontent imports
+				if (lastProgressLog > 0 || stats.length > 1) {
+					logProgress(true);
+					await logStats();
+				}
 			});
 		}
 	};
