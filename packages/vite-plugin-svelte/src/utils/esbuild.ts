@@ -1,5 +1,4 @@
-import { promises as fs } from 'fs';
-// import {readFileSync} from "fs";
+import { readFileSync } from 'fs';
 import { compile, preprocess } from 'svelte/compiler';
 import { DepOptimizationOptions } from 'vite';
 import { Compiled } from './compile';
@@ -28,11 +27,7 @@ interface FileStat {
 interface GroupStat {
 	pkg: string;
 	count: number;
-	readTime: number;
-	preprocessTime: number;
 	compileTime: number;
-	start: number;
-	end: number;
 }
 
 function duration(timestamps: TimeStamp[], to: string, from?: string): number {
@@ -40,11 +35,10 @@ function duration(timestamps: TimeStamp[], to: string, from?: string): number {
 	const fromIndex = from ? timestamps.findIndex((t) => t.event === from) : toIndex - 1;
 	return timestamps[toIndex].ts - timestamps[fromIndex].ts;
 }
-function eventTS(timestamps: TimeStamp[], event: string): number {
-	return timestamps.find((t) => t.event === event).ts;
-}
+
 function humanDuration(n: number) {
-	return n < 10 ? `${n.toFixed(1)}ms` : `${(n / 1000).toFixed(3)}s`;
+	// 99.9ms  0.10s
+	return n < 100 ? `${n.toFixed(1)}ms` : `${(n / 1000).toFixed(2)}s`;
 }
 
 export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
@@ -59,9 +53,112 @@ export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
 			const svelteFilter = new RegExp(`\\.(` + svelteExtensions.join('|') + `)(\\?.*)?$`);
 			const stats: FileStat[] = [];
 			let bundleStart: number;
+			const progressDelay = 2000;
+			const progressThrottle = 200;
+			let lastProgressLog = 0;
+			const logProgress = (done = false) => {
+				const now = performance.now();
+				if (
+					done ||
+					now - (lastProgressLog || bundleStart) >
+						(lastProgressLog ? progressThrottle : progressDelay)
+				) {
+					lastProgressLog = now;
+					log.info.progress(
+						`prebundling svelte dependencies - files:${`${stats.length}`.padStart(
+							5,
+							' '
+						)} duration:${`${humanDuration(now - bundleStart)}`.padStart(7, ' ')}${
+							done ? ' - done' : ''
+						}`,
+						done
+					);
+				}
+			};
+
+			const logStats = async () => {
+				// find package jsons
+
+				await Promise.all(
+					stats.map((stat) => findClosestPkgJsonPath(stat.filename).then((pkg) => (stat.pkg = pkg)))
+				);
+				if (stats.length === 1) {
+					const stat = stats[0];
+					const libname = JSON.parse(readFileSync(stat.pkg, 'utf-8')).name;
+					const importString = stat.filename.slice(stat.filename.lastIndexOf(`/${libname}/`) + 1);
+					const componentName = importString.slice(
+						importString.lastIndexOf('/') + 1,
+						importString.lastIndexOf('.')
+					);
+					log.warn.once(
+						`prebundled ${importString}. Change the import to \`import {${componentName}} from '${libname}'\` or add ${libname} to optimizeDeps.exclude.`
+					);
+					return;
+				}
+				// group stats
+				const grouped: { [key: string]: GroupStat } = {};
+				stats.forEach((stat) => {
+					const compileTime = duration(stat.timestamps, 'compiled');
+					if (!grouped[stat.pkg]) {
+						const name = JSON.parse(readFileSync(stat.pkg, 'utf-8')).name;
+						grouped[stat.pkg] = {
+							count: 1,
+							compileTime,
+							pkg: name ?? stat.pkg
+						};
+					} else {
+						const group = grouped[stat.pkg];
+						group.count += 1;
+						group.compileTime += compileTime;
+					}
+				});
+
+				const groups = Object.values(grouped);
+				groups.sort((a, b) => b.count - a.count);
+				const statLines = groups.map((groupStat) => {
+					const compileTime = groupStat.compileTime;
+					const compileAvg = groupStat.compileTime / groupStat.count;
+					return [
+						groupStat.pkg,
+						`${groupStat.count}`,
+						humanDuration(compileTime),
+						humanDuration(compileAvg)
+					];
+				});
+				statLines.unshift(['library', 'files', 'time', 'avg']);
+				const columnWidths = statLines.reduce(
+					(widths: number[], row) => {
+						for (let i = 0; i < row.length; i++) {
+							const cell = row[i];
+							if (widths[i] < cell.length) {
+								widths[i] = cell.length;
+							}
+						}
+						return widths;
+					},
+					statLines[0].map(() => 0)
+				);
+
+				const table = statLines
+					.map((row) =>
+						row
+							.map((cell, i) => {
+								if (i === 0) {
+									return cell.padEnd(columnWidths[i], ' ');
+								} else {
+									return cell.padStart(columnWidths[i], ' ');
+								}
+							})
+							.join('\t')
+					)
+					.join('\n');
+				log.info('prebundling compile stats', table);
+			};
+
 			build.onStart(() => {
 				stats.length = 0;
 				bundleStart = performance.now();
+				lastProgressLog = 0;
 			});
 
 			build.onLoad({ filter: svelteFilter }, async ({ path: filename }) => {
@@ -69,15 +166,10 @@ export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
 				const takeTimestamp = (event: string) => {
 					timestamps.push({ event, ts: performance.now() });
 				};
-				takeTimestamp('start');
-
-				// TODO readFileSync reads the file itself more efficiently, but blocks. which one is faster?
-				//const code = readFileSync(filename,'utf-8')
-				const code = await fs.readFile(filename, 'utf8');
-				takeTimestamp('read');
+				logProgress();
+				const code = readFileSync(filename, 'utf-8');
 				try {
 					const contents = await compileSvelte(options, { filename, code }, takeTimestamp);
-					takeTimestamp('end');
 					stats.push({ filename, timestamps });
 					return { contents };
 				} catch (e) {
@@ -86,84 +178,8 @@ export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
 			});
 
 			build.onEnd(async () => {
-				const totalDuration = performance.now() - bundleStart;
-				// find package jsons
-				await Promise.all(
-					stats.map((stat) => findClosestPkgJsonPath(stat.filename).then((pkg) => (stat.pkg = pkg)))
-				);
-				// group stats
-				const grouped: { [key: string]: GroupStat } = {};
-				stats.forEach((stat) => {
-					const readTime = duration(stat.timestamps, 'read');
-					const preprocessTime = duration(stat.timestamps, 'preprocessed');
-					const compileTime = duration(stat.timestamps, 'compiled');
-					const start = eventTS(stat.timestamps, 'start');
-					const end = eventTS(stat.timestamps, 'end');
-
-					if (!grouped[stat.pkg]) {
-						grouped[stat.pkg] = {
-							start,
-							end,
-							count: 1,
-							readTime,
-							preprocessTime,
-							compileTime,
-							pkg: stat.pkg
-						};
-					} else {
-						const group = grouped[stat.pkg];
-						group.count += 1;
-						group.readTime += readTime;
-						group.preprocessTime += preprocessTime;
-						group.compileTime += compileTime;
-
-						if (group.start > start) {
-							group.start = start;
-						}
-						if (group.end < end) {
-							group.end = end;
-						}
-					}
-				});
-				for (const groupStat of Object.values(grouped)) {
-					let name = JSON.parse(await fs.readFile(groupStat.pkg, 'utf-8')).name;
-					if (!name) {
-						name = groupStat.pkg;
-					}
-
-					const dur = groupStat.end - groupStat.start;
-					const durAvg = dur / groupStat.count;
-					const readTime = groupStat.readTime;
-					const preprocessTime = groupStat.preprocessTime;
-					const preprocessTimeAvg = groupStat.preprocessTime / groupStat.count;
-					const readTimeAvg = groupStat.readTime / groupStat.count;
-					const compileTime = groupStat.compileTime;
-					const compileAvg = groupStat.compileTime / groupStat.count;
-					const outputs = {
-						Files: `${groupStat.count}`,
-						Duration: humanDuration(dur),
-						DurationAvg: humanDuration(durAvg),
-						ReadTime: humanDuration(readTime),
-						ReadTimeAvg: humanDuration(readTimeAvg),
-						PreprocessTime: humanDuration(preprocessTime),
-						PreprocessTimeAvg: humanDuration(preprocessTimeAvg),
-						CompileTime: humanDuration(compileTime),
-						CompileTimeAvg: humanDuration(compileAvg)
-					};
-					const keyLen =
-						Object.keys(outputs).reduce((len, key) => (key.length > len ? key.length : len), 0) + 1;
-					const valueLen = Object.values(outputs).reduce(
-						(len, value) => (value.length > len ? value.length : len),
-						0
-					);
-
-					log.warn(
-						`prebundling stats for ${name}: ${Object.entries(outputs)
-							.map(([k, v]) => `\n - ${`${k}:`.padEnd(keyLen, ' ')}${v.padStart(valueLen, ' ')}`)
-							.join('')}`
-					);
-				}
-				log.warn(`total duration: ${humanDuration(totalDuration)}`);
+				logProgress(true);
+				await logStats();
 			});
 		}
 	};
@@ -191,9 +207,7 @@ async function compileSvelte(
 
 	if (options.preprocess) {
 		try {
-			takeTimestamp('preprocessedStart');
 			preprocessed = await preprocess(code, options.preprocess, { filename });
-			takeTimestamp('preprocessed');
 		} catch (e) {
 			e.message = `Error while preprocessing ${filename}${e.message ? ` - ${e.message}` : ''}`;
 			throw e;

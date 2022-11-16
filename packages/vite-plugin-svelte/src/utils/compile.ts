@@ -1,15 +1,19 @@
-import { CompileOptions, ResolvedOptions } from './options';
+import { Arrayable, CompileOptions, ResolvedOptions } from './options';
 import { compile, preprocess, walk } from 'svelte/compiler';
 // @ts-ignore
 import { createMakeHot } from 'svelte-hmr';
 import { SvelteRequest } from './id';
 import { safeBase64Hash } from './hash';
 import { log } from './log';
+import { createEnhanceCssHmrPreprocessor } from './preprocess';
+//eslint-disable-next-line node/no-missing-import
+import { PreprocessorGroup } from 'svelte/types/compiler/preprocess';
 
 const scriptLangRE = /<script [^>]*lang=["']?([^"' >]+)["']?[^>]*>/;
 
-const _createCompileSvelte = (makeHot: Function) =>
-	async function compileSvelte(
+const _createCompileSvelte = (makeHot: Function) => {
+	const cssHmrPreprocessor = createEnhanceCssHmrPreprocessor();
+	return async function compileSvelte(
 		svelteRequest: SvelteRequest,
 		code: string,
 		options: Partial<ResolvedOptions>
@@ -24,10 +28,20 @@ const _createCompileSvelte = (makeHot: Function) =>
 			generate: ssr ? 'ssr' : 'dom',
 			format: 'esm'
 		};
+		let preprocessors: Arrayable<PreprocessorGroup> | undefined;
 		if (options.hot && options.emitCss) {
 			const hash = `s-${safeBase64Hash(normalizedFilename)}`;
 			log.debug(`setting cssHash ${hash} for ${normalizedFilename}`);
 			compileOptions.cssHash = () => hash;
+			if (options.preprocess) {
+				preprocessors = Array.isArray(options.preprocess)
+					? [...options.preprocess, cssHmrPreprocessor]
+					: [options.preprocess, cssHmrPreprocessor];
+			} else {
+				preprocessors = cssHmrPreprocessor;
+			}
+		} else {
+			preprocessors = options.preprocess;
 		}
 		if (ssr && compileOptions.enableSourcemap !== false) {
 			if (typeof compileOptions.enableSourcemap === 'object') {
@@ -39,9 +53,9 @@ const _createCompileSvelte = (makeHot: Function) =>
 
 		let preprocessed;
 
-		if (options.preprocess) {
+		if (preprocessors) {
 			try {
-				preprocessed = await preprocess(code, options.preprocess, { filename });
+				preprocessed = await preprocess(code, preprocessors, { filename });
 			} catch (e) {
 				e.message = `Error while preprocessing ${filename}${e.message ? ` - ${e.message}` : ''}`;
 				throw e;
@@ -99,7 +113,7 @@ const _createCompileSvelte = (makeHot: Function) =>
 			dependencies
 		};
 	};
-
+};
 function buildMakeHot(options: ResolvedOptions) {
 	const needsMakeHot = options.hot !== false && options.isServe && !options.isProduction;
 	if (needsMakeHot) {

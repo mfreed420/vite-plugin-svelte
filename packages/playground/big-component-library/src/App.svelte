@@ -8,6 +8,17 @@
 		DatePicker
 	} from 'carbon-components-svelte';
 	import { Save } from 'carbon-icons-svelte';
+	/*
+	// deep imports
+	import Accordion from 'carbon-components-svelte/src/Accordion/Accordion.svelte'
+	import AccordionItem from 'carbon-components-svelte/src/Accordion/AccordionItem.svelte'
+	import Button from 'carbon-components-svelte/src/Button/Button.svelte'
+	import DatePickerInput from 'carbon-components-svelte/src/DatePicker/DatePickerInput.svelte'
+	import Link from 'carbon-components-svelte/src/Link/Link.svelte'
+	import DatePicker from 'carbon-components-svelte/src/DatePicker/DatePicker.svelte'
+	import Save from 'carbon-icons-svelte/lib/Save.svelte';
+
+	 */
 	import { assign } from 'lodash-es';
 	import toNumber from 'lodash-es/toNumber.js';
 	import toPath from 'lodash-es/toPath.js';
