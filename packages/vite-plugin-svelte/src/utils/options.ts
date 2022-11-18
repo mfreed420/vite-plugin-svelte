@@ -358,6 +358,14 @@ export async function buildExtraViteConfig(
 
 	// handle prebundling for svelte files
 	if (options.prebundleSvelteLibraries) {
+		// TODO optimizeDeps on build doesn't work
+		const optimizeDepsDisabled = config.optimizeDeps?.disabled;
+		if (optimizeDepsDisabled === 'dev' || optimizeDepsDisabled === false) {
+			log.warn(
+				'optimizeDeps does not work with vite-plugin-svelte prebundleSvelteLibraries while building, disabling it for build'
+			);
+		}
+		extraViteConfig.optimizeDeps.disabled = 'build';
 		extraViteConfig.optimizeDeps.extensions = options.extensions ?? ['.svelte'];
 		// Add esbuild plugin to prebundle Svelte files.
 		// Currently a placeholder as more information is needed after Vite config is resolved,
@@ -365,6 +373,21 @@ export async function buildExtraViteConfig(
 		extraViteConfig.optimizeDeps.esbuildOptions = {
 			plugins: [{ name: facadeEsbuildSveltePluginName, setup: () => {} }]
 		};
+		// TODO optimizeDeps on ssr doesn't work
+		const ssrOptimizeDepsDisabled = config.ssr?.optimizeDeps?.disabled;
+		if (ssrOptimizeDepsDisabled != null && ssrOptimizeDepsDisabled !== true) {
+			log.warn(
+				'ssr.optimizeDeps does not work with vite-plugin-svelte prebundleSvelteLibraries, disabling it'
+			);
+			extraViteConfig.ssr.optimizeDeps = { disabled: true };
+		}
+		/*
+		extraViteConfig.ssr.optimizeDeps = structuredClone(extraViteConfig.optimizeDeps)
+		// we need it 2 times because we want 2 instances of the esbuild plugin
+		extraViteConfig.ssr.optimizeDeps.esbuildOptions = {
+			plugins: [{ name: facadeEsbuildSveltePluginName, setup: () => {} }]
+		};
+		 */
 	}
 
 	// enable hmrPartialAccept if not explicitly disabled
@@ -465,11 +488,17 @@ function buildExtraConfigForSvelte(config: UserConfig) {
 }
 
 export function patchResolvedViteConfig(viteConfig: ResolvedConfig, options: ResolvedOptions) {
-	const facadeEsbuildSveltePlugin = viteConfig.optimizeDeps.esbuildOptions?.plugins?.find(
+	const facadeEsbuildSveltePlugin = viteConfig.optimizeDeps?.esbuildOptions?.plugins?.find(
 		(plugin) => plugin.name === facadeEsbuildSveltePluginName
 	);
 	if (facadeEsbuildSveltePlugin) {
 		Object.assign(facadeEsbuildSveltePlugin, esbuildSveltePlugin(options));
+	}
+	const ssrFacadeEsbuildSveltePlugin = viteConfig.ssr?.optimizeDeps?.esbuildOptions?.plugins?.find(
+		(plugin) => plugin.name === facadeEsbuildSveltePluginName
+	);
+	if (ssrFacadeEsbuildSveltePlugin) {
+		Object.assign(ssrFacadeEsbuildSveltePlugin, esbuildSveltePlugin(options, true));
 	}
 }
 

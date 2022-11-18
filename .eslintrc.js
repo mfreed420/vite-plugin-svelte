@@ -159,7 +159,10 @@ module.exports = {
 			}
 		},
 		{
-			files: ['packages/playground/kit-demo-app/src/**'],
+			files: [
+				'packages/playground/kit-demo-app/src/**',
+				'packages/playground/big-component-library-kit/src/**'
+			],
 			rules: {
 				/* required because $app and $lib are not known */
 				'node/no-missing-import': 'off',

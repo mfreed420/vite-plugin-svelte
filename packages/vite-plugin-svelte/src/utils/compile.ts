@@ -102,7 +102,9 @@ const _createCompileSvelte = (makeHot: Function) => {
 		}
 
 		compiled.js.dependencies = dependencies;
-
+		if (ssr) {
+			log.info(`compiled ${normalizedFilename} for ssr`);
+		}
 		return {
 			filename,
 			normalizedFilename,

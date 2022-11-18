@@ -41,14 +41,13 @@ function humanDuration(n: number) {
 	return n < 100 ? `${n.toFixed(1)}ms` : `${(n / 1000).toFixed(2)}s`;
 }
 
-export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
+export function esbuildSveltePlugin(options: ResolvedOptions, ssr = false): EsbuildPlugin {
 	return {
 		name: 'vite-plugin-svelte:optimize-svelte',
 		setup(build) {
 			// Skip in scanning phase as Vite already handles scanning Svelte files.
 			// Otherwise this would heavily slow down the scanning phase.
 			if (build.initialOptions.plugins?.some((v) => v.name === 'vite:dep-scan')) return;
-
 			const svelteExtensions = (options.extensions ?? ['.svelte']).map((ext) => ext.slice(1));
 			const svelteFilter = new RegExp(`\\.(` + svelteExtensions.join('|') + `)(\\?.*)?$`);
 			const stats: FileStat[] = [];
@@ -65,7 +64,7 @@ export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
 				) {
 					lastProgressLog = now;
 					log.info.progress(
-						`prebundling svelte dependencies - files:${`${stats.length}`.padStart(
+						`prebundling svelte dependencies - ssr: ${ssr} files:${`${stats.length}`.padStart(
 							5,
 							' '
 						)} duration:${`${humanDuration(now - bundleStart)}`.padStart(7, ' ')}${
@@ -150,7 +149,7 @@ export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
 							.join('\t')
 					)
 					.join('\n');
-				log.info('prebundling compile stats', table);
+				log.info('prebundling compile stats - ssr: ' + ssr, table);
 			};
 
 			build.onStart(() => {
@@ -167,7 +166,7 @@ export function esbuildSveltePlugin(options: ResolvedOptions): EsbuildPlugin {
 				logProgress();
 				const code = readFileSync(filename, 'utf-8');
 				try {
-					const contents = await compileSvelte(options, { filename, code }, takeTimestamp);
+					const contents = await compileSvelte(options, { filename, code }, takeTimestamp, ssr);
 					stats.push({ filename, timestamps });
 					return { contents };
 				} catch (e) {
@@ -191,7 +190,8 @@ async function compileSvelte(
 	options: ResolvedOptions,
 	{ filename, code }: { filename: string; code: string },
 	// eslint-disable-next-line no-unused-vars
-	takeTimestamp: (event: string) => void
+	takeTimestamp: (event: string) => void,
+	ssr = false
 ): Promise<string> {
 	let css = options.compilerOptions.css;
 	if (css !== 'none') {
@@ -202,7 +202,7 @@ async function compileSvelte(
 		css,
 		filename,
 		format: 'esm',
-		generate: 'dom'
+		generate: ssr ? 'ssr' : 'dom'
 	};
 
 	let preprocessed;

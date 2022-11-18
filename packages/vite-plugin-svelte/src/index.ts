@@ -84,6 +84,7 @@ export function svelte(inlineOptions?: Partial<Options>): Plugin[] {
 				// TODO deep clone to avoid mutability from outside?
 				api.options = options;
 				log.debug('resolved options', options);
+				log.warn('optimizeDeps', { regular: config.optimizeDeps, ssr: config.ssr?.optimizeDeps });
 			},
 
 			async buildStart() {
@@ -158,14 +159,15 @@ export function svelte(inlineOptions?: Partial<Options>): Plugin[] {
 				}
 				//@ts-expect-error scan
 				const scan = !!opts?.scan; // scanner phase of optimizeDeps
+				const optimizeDeps = ssr ? viteConfig.ssr.optimizeDeps : viteConfig.optimizeDeps;
 				const isPrebundled =
 					options.prebundleSvelteLibraries &&
-					viteConfig.optimizeDeps?.disabled !== true &&
-					viteConfig.optimizeDeps?.disabled !== (options.isBuild ? 'build' : 'dev') &&
-					!isDepExcluded(importee, viteConfig.optimizeDeps?.exclude ?? []);
+					optimizeDeps?.disabled !== true &&
+					optimizeDeps?.disabled !== (options.isBuild ? 'build' : 'dev') &&
+					!isDepExcluded(importee, optimizeDeps?.exclude ?? []);
 				// for prebundled libraries we let vite resolve the prebundling result
 				// for ssr, during scanning and non-prebundled, we do it
-				if (ssr || scan || !isPrebundled) {
+				if (scan || !isPrebundled) {
 					try {
 						const resolved = await resolveViaPackageJsonSvelte(importee, importer, cache);
 						if (resolved) {
