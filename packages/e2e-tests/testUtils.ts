@@ -220,11 +220,14 @@ export async function editViteConfig(replacer: (str: string) => string) {
 		await waitForServerRestartAndReloadPage();
 	}
 }
-
-export async function waitForServerRestartAndReloadPage(timeout = 10000) {
+type WaitUntilEvent = 'commit' | 'load' | 'domcontentloaded' | 'networkidle';
+export async function waitForServerRestartAndReloadPage(
+	restartTimeout = 10000,
+	waitUntil?: WaitUntilEvent
+) {
 	const logs = e2eServer.logs.server.out;
 	const startIdx = logs.length;
-	let timeleft = timeout;
+	let timeleft = restartTimeout;
 	const pollInterval = 50;
 	let restarted = false;
 	while (timeleft > 0) {
@@ -236,13 +239,13 @@ export async function waitForServerRestartAndReloadPage(timeout = 10000) {
 		timeleft -= pollInterval;
 	}
 	if (!restarted) {
-		throw new Error(`server did not restart after ${timeout}ms`);
+		throw new Error(`server did not restart after ${restartTimeout}ms`);
 	}
-	await reloadPage();
+	await reloadPage(waitUntil);
 }
 
-export async function reloadPage() {
-	await Promise.all([page.reload(), waitForViteConnect(page)]);
+export async function reloadPage(waitUntil: WaitUntilEvent = 'commit') {
+	await Promise.all([waitForViteConnect(page), page.reload({ waitUntil })]);
 }
 
 export async function waitForNavigation(opts: Parameters<typeof page.waitForNavigation>[0]) {
