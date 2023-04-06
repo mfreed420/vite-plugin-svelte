@@ -47,7 +47,7 @@ if (!isBuild) {
 		editFile('svelte.config.js', (c) =>
 			c.replace('prebundleSvelteLibraries: true', 'prebundleSvelteLibraries: false')
 		);
-		await waitForServerRestartAndReloadPage(10000, 'domcontentloaded');
+		await waitForServerRestartAndReloadPage();
 		await expectPageToWork();
 		const metadataFile = readVitePrebundleMetadata();
 		const metadata = JSON.parse(metadataFile);

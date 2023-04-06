@@ -244,7 +244,7 @@ export async function waitForServerRestartAndReloadPage(
 	await reloadPage(waitUntil);
 }
 
-export async function reloadPage(waitUntil: WaitUntilEvent = 'commit') {
+export async function reloadPage(waitUntil: WaitUntilEvent = 'domcontentloaded') {
 	await Promise.all([waitForViteConnect(page), page.reload({ waitUntil })]);
 }
 
