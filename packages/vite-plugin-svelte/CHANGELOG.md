@@ -1,5 +1,11 @@
 # @sveltejs/vite-plugin-svelte
 
+## 2.0.5
+
+### Patch Changes
+
+- Log stats in debug mode and remove `experimental.disableCompileStats` option. Use `DEBUG="vite:vite-plugin-svelte:stats"` when starting the dev server or build to log the compile stats. ([#614](https://github.com/sveltejs/vite-plugin-svelte/pull/614))
+
 ## 2.0.4
 
 ### Patch Changes
